@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const twilio = require("twilio");
 const appointmentController = require("../controllers/appointmentController");
+const twilioService = require("../services/external/twilioService");
 const winston = require("winston");
 
 // ✅ Configure Winston Logger
@@ -34,7 +35,7 @@ router.post("/twilio", async (req, res) => {
     if (messageBody.includes("cancel")) {
       const cancellationResponse =
         await appointmentController.cancelAppointmentByPhone(senderPhone);
-      twiml.message(cancellationResponse);
+      twiml.message(cancellationResponse.message);
     } else if (messageBody.includes("reschedule")) {
       twiml.message(
         "Please reply with the new date and time for rescheduling (e.g. 'Next Tuesday at 2pm')."
@@ -153,25 +154,26 @@ router.post("/twilio-voice-doctor", (req, res) => {
   res.send(twiml.toString());
 });
 
-// ✅ Twilio Voice - Confirmation Handler
 router.post("/twilio-voice-confirm", async (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   const appointmentTime = req.body.SpeechResult;
   const phone = normalizePhoneNumber(req.body.From);
-  const doctor = req.session.doctor;
+  const doctor = req.session?.doctor || "Unknown Doctor";
 
   logger.info(`🗣️ Appointment Time Captured: ${appointmentTime || "None"}`);
   logger.info(`📝 Processing appointment for Dr. ${doctor} with ${phone}`);
 
-  if (!appointmentTime) {
-    twiml.say("I didn't catch the appointment time. Let's try again.");
-    twiml.redirect("/api/v1/webhooks/twilio-voice-doctor");
-    return res.send(twiml.toString());
+  // Validate we have all required data
+  if (!appointmentTime || !phone) {
+    logger.error("Missing required data for appointment confirmation");
+    twiml.say("We're missing some information. Let's start over.");
+    twiml.redirect("/api/v1/webhooks/twilio-voice");
+    return res.type("text/xml").send(twiml.toString());
   }
 
   try {
     // Create appointment
-    await appointmentController.createAppointmentService({
+    const appointment = await appointmentController.createAppointmentService({
       doctor,
       voiceDateTime: appointmentTime,
       phone,
@@ -183,30 +185,37 @@ router.post("/twilio-voice-confirm", async (req, res) => {
       `Your appointment with Dr. ${doctor} has been confirmed for ${appointmentTime}.`
     );
     twiml.pause({ length: 1 });
-    twiml.say(
-      "You will receive a text message confirmation shortly. Thank you for using our service. Goodbye!"
-    );
+
+    // Only mention SMS if Twilio is configured
+    if (twilioService.isConfigured()) {
+      twiml.say("You will receive a text message confirmation shortly.");
+    }
+
+    twiml.say("Thank you for using our service. Goodbye!");
 
     // Clear session
-    req.session.destroy();
+    if (req.session) {
+      req.session.destroy();
+    }
+
+    res.type("text/xml");
+    return res.send(twiml.toString());
   } catch (error) {
     logger.error(`❌ Voice Appointment Error: ${error.message}`);
 
-    twiml.say("We encountered an issue booking your appointment.");
+    twiml.say("We encountered an error processing your appointment.");
     twiml.pause({ length: 1 });
 
     if (error.message.includes("No available slots")) {
-      twiml.say(
-        "There are no available slots at that time. Please try a different time."
-      );
+      twiml.say("There are no available slots at that time.");
       twiml.redirect("/api/v1/webhooks/twilio-voice-doctor");
     } else {
       twiml.say("Please call our office directly for assistance. Goodbye.");
     }
-  }
 
-  res.type("text/xml");
-  res.send(twiml.toString());
+    res.type("text/xml");
+    return res.send(twiml.toString());
+  }
 });
 
 module.exports = router;

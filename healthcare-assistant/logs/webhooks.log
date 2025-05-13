@@ -36,3 +36,58 @@
 {"level":"info","message":"🗣️ Appointment Time Captured: next Friday, 5 p.m."}
 {"level":"info","message":"📝 Processing appointment for Dr. Dutchess fight. with 14373185589"}
 {"level":"error","message":"❌ Voice Appointment Error: username is required"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Tucker Smith."}
+{"level":"info","message":"📝 Stored doctor name: Tucker Smith. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Monday, 2 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Tucker Smith. with 14373185589"}
+{"level":"error","message":"❌ Voice Appointment Error: username is required"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Succasunna."}
+{"level":"info","message":"📝 Stored doctor name: Succasunna. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 2 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Succasunna. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Dr. Smith"}
+{"level":"info","message":"📝 Stored doctor name: Dr. Smith for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 2 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Dr. Smith with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Czech Republic."}
+{"level":"info","message":"📝 Stored doctor name: Czech Republic. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 2 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Czech Republic. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Buffalo Bayou."}
+{"level":"info","message":"📝 Stored doctor name: Buffalo Bayou. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, at 2 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Buffalo Bayou. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Shepard Smith."}
+{"level":"info","message":"📝 Stored doctor name: Shepard Smith. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, at 2 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Shepard Smith. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Smith."}
+{"level":"info","message":"📝 Stored doctor name: Smith. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 3 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Smith. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Smith."}
+{"level":"info","message":"📝 Stored doctor name: Smith. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 3 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Smith. with 14373185589"}
+{"level":"error","message":"❌ Voice Appointment Error: logger is not defined"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Play."}
+{"level":"info","message":"📝 Stored doctor name: Play. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 3 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Play. with 14373185589"}
+{"level":"error","message":"❌ Voice Appointment Error: twilioService is not defined"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Jackalope."}
+{"level":"info","message":"📝 Stored doctor name: Jackalope. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: today at 3 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Jackalope. with 14373185589"}

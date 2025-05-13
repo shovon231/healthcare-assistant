@@ -2,13 +2,19 @@ const Appointment = require("../models/Appointment");
 const twilioService = require("../services/external/twilioService");
 const winston = require("winston");
 const { v4: uuidv4 } = require("uuid");
+const chrono = require("chrono-node");
 
-// ✅ Configure Winston Logger
+// Configure Winston Logger
 const logger = winston.createLogger({
   level: "info",
-  format: winston.format.json(),
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
   transports: [
-    new winston.transports.Console(),
+    new winston.transports.Console({
+      format: winston.format.simple(),
+    }),
     new winston.transports.File({
       filename: "logs/appointments.log",
       level: "info",
@@ -18,11 +24,28 @@ const logger = winston.createLogger({
 
 // Utility Functions
 const generateTemporaryPatientId = (phone) => {
-  return `temp-${phone.replace(/\D/g, "")}-${uuidv4().slice(0, 8)}`;
+  const cleanPhone = phone.replace(/\D/g, "");
+  return `temp-${cleanPhone}-${uuidv4().slice(0, 8)}`;
 };
 
 const parseVoiceDateTime = (timeString) => {
-  // Simple parsing - you may want to use a library like chrono-node for better parsing
+  try {
+    const parsedDate = chrono.parseDate(timeString);
+    if (parsedDate) {
+      return {
+        date: parsedDate.toISOString().split("T")[0],
+        time: parsedDate.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        datetime: parsedDate,
+      };
+    }
+  } catch (error) {
+    logger.warn(`⚠️ Falling back to simple date parsing: ${error.message}`);
+  }
+
+  // Fallback to simple parsing
   const now = new Date();
   const isTomorrow = timeString.toLowerCase().includes("tomorrow");
 
@@ -30,7 +53,6 @@ const parseVoiceDateTime = (timeString) => {
     now.setDate(now.getDate() + 1);
   }
 
-  // Extract time (very basic example)
   const timeMatch = timeString.match(/(\d{1,2})(?::\d{2})?\s?(am|pm)?/i);
   if (timeMatch) {
     let hours = parseInt(timeMatch[1]);
@@ -46,47 +68,61 @@ const parseVoiceDateTime = (timeString) => {
   return {
     date: now.toISOString().split("T")[0],
     time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    datetime: now,
   };
 };
 
-// 🛎️ Service Function for Direct Calls
-exports.createAppointmentService = async (appointmentData) => {
+// Service Function with Enhanced Twilio Handling
+const createAppointmentService = async (appointmentData) => {
   try {
     let { patientId, doctor, date, time, phone } = appointmentData;
 
-    // Handle voice commands that combine date and time
-    if (!date && !time && appointmentData.voiceDateTime) {
+    // Validate required fields
+    if (!doctor || !phone) {
+      throw new Error("Doctor name and phone number are required");
+    }
+
+    // Handle voice commands
+    if ((!date || !time) && appointmentData.voiceDateTime) {
       const parsed = parseVoiceDateTime(appointmentData.voiceDateTime);
       date = parsed.date;
       time = parsed.time;
     }
 
+    if (!date || !time) {
+      throw new Error("Date and time are required");
+    }
+
     // Generate temporary patient ID if not provided
-    if (!patientId && phone) {
+    if (!patientId) {
       patientId = generateTemporaryPatientId(phone);
     }
 
-    if (!doctor || !date || !time || !phone) {
-      throw new Error(
-        "Missing required fields: doctor, date, time, and phone are required."
-      );
-    }
-
+    // Create the appointment
     const appointment = await Appointment.create({
       patientId,
-      doctor,
+      doctor: doctor.trim(),
       date,
       time,
-      phone,
+      phone: phone.replace(/\D/g, ""),
       status: "confirmed",
-      source: appointmentData.source || "voice", // Track how appointment was created
+      source: appointmentData.source || "voice",
     });
 
-    await twilioService.sendBookingConfirmation(phone, doctor, date, time);
+    // Send confirmation if Twilio is configured
+    try {
+      if (twilioService.isConfigured()) {
+        await twilioService.sendBookingConfirmation(phone, doctor, date, time);
+        logger.info(`📱 Sent SMS confirmation to ${phone}`);
+      } else {
+        logger.warn("Twilio not configured - skipping SMS notification");
+      }
+    } catch (twilioError) {
+      logger.error(`⚠️ Twilio notification failed: ${twilioError.message}`);
+      // Don't fail the appointment creation if Twilio fails
+    }
 
-    logger.info(
-      `✅ Appointment created for ${phone} with Dr. ${doctor} on ${date} at ${time}`
-    );
+    logger.info(`✅ Appointment created for ${phone} with Dr. ${doctor}`);
     return appointment;
   } catch (error) {
     logger.error(`❌ Error in createAppointmentService: ${error.message}`);
@@ -94,29 +130,47 @@ exports.createAppointmentService = async (appointmentData) => {
   }
 };
 
-// 📅 Express Controller for HTTP Requests
-exports.createAppointment = async (req, res) => {
+// Express Controller for HTTP Requests
+const createAppointment = async (req, res) => {
   try {
-    const appointment = await this.createAppointmentService(req.body);
-    res.status(201).json({ success: true, data: appointment });
+    const appointment = await createAppointmentService(req.body);
+    res.status(201).json({
+      success: true,
+      data: appointment,
+      message: "Appointment created successfully",
+    });
   } catch (error) {
     logger.error(`❌ Error in createAppointment: ${error.message}`);
     res.status(400).json({
       success: false,
-      message: error.message,
+      message: error.message.includes("required")
+        ? error.message
+        : "Failed to create appointment",
     });
   }
 };
 
-// 📜 Get All Appointments
-exports.getAppointments = async (req, res) => {
+// Get All Appointments with Enhanced Filtering
+const getAppointments = async (req, res) => {
   try {
-    const { doctor, page = 1, limit = 10 } = req.query;
-    const query = doctor ? { doctor } : {};
+    const { doctor, phone, date, status, page = 1, limit = 10 } = req.query;
+    const query = {};
 
-    const appointments = await Appointment.find(query)
-      .skip((page - 1) * limit)
-      .limit(limit);
+    if (doctor) query.doctor = new RegExp(doctor, "i");
+    if (phone) query.phone = phone.replace(/\D/g, "");
+    if (date) query.date = date;
+    if (status) query.status = status;
+
+    const options = {
+      skip: (page - 1) * limit,
+      limit: parseInt(limit),
+      sort: { date: 1, time: 1 },
+    };
+
+    const [appointments, total] = await Promise.all([
+      Appointment.find(query, null, options),
+      Appointment.countDocuments(query),
+    ]);
 
     res.status(200).json({
       success: true,
@@ -124,7 +178,8 @@ exports.getAppointments = async (req, res) => {
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: await Appointment.countDocuments(query),
+        total,
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -136,59 +191,117 @@ exports.getAppointments = async (req, res) => {
   }
 };
 
-// 🔄 Update Appointment
-exports.updateAppointment = async (req, res) => {
+// Update Appointment with Validation
+const updateAppointment = async (req, res) => {
   try {
-    const { date, time, phone, doctor } = req.body;
+    const { id } = req.params;
+    const updateData = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment ID is required",
+      });
+    }
+
+    const appointment = await Appointment.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found",
+      });
+    }
+
+    // Send update confirmation if Twilio is configured
+    try {
+      if (
+        twilioService.isConfigured() &&
+        (updateData.date || updateData.time || updateData.doctor)
+      ) {
+        await twilioService.sendBookingConfirmation(
+          appointment.phone,
+          appointment.doctor,
+          appointment.date,
+          appointment.time
+        );
+        logger.info(`📱 Sent update notification to ${appointment.phone}`);
+      }
+    } catch (twilioError) {
+      logger.error(
+        `⚠️ Twilio update notification failed: ${twilioError.message}`
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      data: appointment,
+      message: "Appointment updated successfully",
+    });
+  } catch (error) {
+    logger.error(`❌ Error updating appointment: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message:
+        error.name === "ValidationError"
+          ? error.message
+          : "Failed to update appointment",
+    });
+  }
+};
+
+// Cancel Appointment with Enhanced Checks
+const deleteAppointment = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment ID is required",
+      });
+    }
+
     const appointment = await Appointment.findByIdAndUpdate(
-      req.params.id,
-      req.body,
+      id,
+      { status: "cancelled" },
       { new: true }
     );
 
     if (!appointment) {
       return res.status(404).json({
         success: false,
-        message: "Appointment not found.",
+        message: "Appointment not found",
       });
     }
 
-    await twilioService.sendBookingConfirmation(phone, doctor, date, time);
-    res.status(200).json({ success: true, data: appointment });
-  } catch (error) {
-    logger.error(`❌ Error updating appointment: ${error.message}`);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update appointment",
-    });
-  }
-};
-
-// ❌ Cancel Appointment
-exports.deleteAppointment = async (req, res) => {
-  try {
-    const appointment = await Appointment.findByIdAndDelete(req.params.id);
-
-    if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: "Appointment not found.",
-      });
+    // Send cancellation notification if Twilio is configured
+    try {
+      if (twilioService.isConfigured()) {
+        await twilioService.sendCancellationNotification(
+          appointment.phone,
+          appointment.doctor,
+          appointment.date,
+          appointment.time
+        );
+        logger.info(`📱 Sent cancellation to ${appointment.phone}`);
+      }
+    } catch (twilioError) {
+      logger.error(
+        `⚠️ Twilio cancellation notification failed: ${twilioError.message}`
+      );
     }
-
-    await twilioService.sendCancellationNotification(
-      appointment.phone,
-      appointment.doctor,
-      appointment.date,
-      appointment.time
-    );
 
     res.status(200).json({
       success: true,
-      message: "Appointment cancelled.",
+      data: appointment,
+      message: "Appointment cancelled successfully",
     });
   } catch (error) {
-    logger.error(`❌ Error deleting appointment: ${error.message}`);
+    logger.error(`❌ Error cancelling appointment: ${error.message}`);
     res.status(500).json({
       success: false,
       message: "Failed to cancel appointment",
@@ -196,27 +309,54 @@ exports.deleteAppointment = async (req, res) => {
   }
 };
 
-// 📞 Cancel Appointment by Phone (for Twilio webhook)
-exports.cancelAppointmentByPhone = async (phoneNumber) => {
+// Cancel Appointment by Phone with Improved Response
+const cancelAppointmentByPhone = async (phoneNumber) => {
   try {
-    const appointment = await Appointment.findOneAndDelete({
-      phone: phoneNumber,
-    });
+    const cleanPhone = phoneNumber.replace(/\D/g, "");
 
-    if (!appointment) {
-      throw new Error("No appointment found for this phone number.");
-    }
-
-    await twilioService.sendCancellationNotification(
-      appointment.phone,
-      appointment.doctor,
-      appointment.date,
-      appointment.time
+    const appointment = await Appointment.findOneAndUpdate(
+      { phone: cleanPhone, status: { $ne: "cancelled" } },
+      { status: "cancelled" },
+      { new: true }
     );
 
-    return `Your appointment with Dr. ${appointment.doctor} on ${appointment.date} at ${appointment.time} has been cancelled.`;
+    if (!appointment) {
+      throw new Error("No active appointment found for this phone number.");
+    }
+
+    // Send cancellation notification if Twilio is configured
+    try {
+      if (twilioService.isConfigured()) {
+        await twilioService.sendCancellationNotification(
+          appointment.phone,
+          appointment.doctor,
+          appointment.date,
+          appointment.time
+        );
+        logger.info(`📱 Sent cancellation to ${appointment.phone}`);
+      }
+    } catch (twilioError) {
+      logger.error(
+        `⚠️ Twilio cancellation notification failed: ${twilioError.message}`
+      );
+    }
+
+    return {
+      success: true,
+      message: `Your appointment with Dr. ${appointment.doctor} on ${appointment.date} at ${appointment.time} has been cancelled.`,
+      appointment,
+    };
   } catch (error) {
     logger.error(`❌ Error cancelling appointment by phone: ${error.message}`);
     throw error;
   }
+};
+
+module.exports = {
+  createAppointmentService,
+  createAppointment,
+  getAppointments,
+  updateAppointment,
+  deleteAppointment,
+  cancelAppointmentByPhone,
 };

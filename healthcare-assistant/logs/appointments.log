@@ -1,3 +1,16 @@
 {"level":"error","message":"❌ Error creating appointment: Cannot destructure property 'patientId' of 'req.body' as it is undefined."}
 {"level":"error","message":"❌ Error in createAppointmentService: Appointment validation failed: patientId: Cast to ObjectId failed for value \"temp-14373185589-95422e9c\" (type string) at path \"patientId\" because of \"BSONError\""}
 {"level":"error","message":"❌ Error in createAppointmentService: username is required"}
+{"level":"error","message":"❌ Error in createAppointmentService: username is required"}
+{"level":"error","message":"Twilio notification failed: twilioService.isConfigured is not a function"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Succasunna."}
+{"level":"error","message":"⚠️ Twilio notification failed: twilioService.isConfigured is not a function","timestamp":"2025-05-13T16:59:59.095Z"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Dr. Smith","timestamp":"2025-05-13T16:59:59.096Z"}
+{"level":"warn","message":"Twilio not configured - skipping SMS notification","timestamp":"2025-05-13T17:08:16.627Z"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Czech Republic.","timestamp":"2025-05-13T17:08:16.628Z"}
+{"level":"error","message":"⚠️ Twilio notification failed: read ETIMEDOUT","timestamp":"2025-05-13T17:28:57.515Z"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Shepard Smith.","timestamp":"2025-05-13T17:28:57.516Z"}
+{"level":"info","message":"📱 Sent SMS confirmation to 14373185589","timestamp":"2025-05-13T18:38:57.558Z"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Play.","timestamp":"2025-05-13T18:38:57.559Z"}
+{"level":"info","message":"📱 Sent SMS confirmation to 14373185589","timestamp":"2025-05-13T19:12:47.926Z"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Jackalope.","timestamp":"2025-05-13T19:12:47.927Z"}

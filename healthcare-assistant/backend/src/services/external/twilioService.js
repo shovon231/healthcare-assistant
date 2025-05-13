@@ -1,78 +1,79 @@
 const twilio = require("twilio");
 const winston = require("winston");
 
-// ✅ Twilio Configuration
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const twilioClient = twilio(accountSid, authToken);
-const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-
-// ✅ Configure Winston Logger
 const logger = winston.createLogger({
-  level: "error",
+  level: "info",
   format: winston.format.json(),
   transports: [
     new winston.transports.Console(),
-    new winston.transports.File({ filename: "logs/twilio-errors.log" }),
+    new winston.transports.File({ filename: "logs/twilio.log" }),
   ],
 });
 
-/**
- * 📢 Send Booking Confirmation SMS
- */
-const sendBookingConfirmation = async (to, doctor, date, time) => {
-  try {
-    const message = `✅ Your appointment with Dr. ${doctor} is confirmed for ${date} at ${time}. Reply CANCEL to cancel or RESCHEDULE to change.`;
-    const response = await twilioClient.messages.create({
-      body: message,
-      from: twilioPhoneNumber,
-      to,
-    });
-    return response;
-  } catch (error) {
-    logger.error(`⚠️ Twilio SMS Error: ${error.message}`);
-    throw error;
-  }
-};
+// Check if Twilio is properly configured
+function isConfigured() {
+  return (
+    !!process.env.TWILIO_ACCOUNT_SID &&
+    !!process.env.TWILIO_AUTH_TOKEN &&
+    !!process.env.TWILIO_PHONE_NUMBER
+  );
+}
 
-/**
- * 🔔 Send Automatic Appointment Reminder (One Day Before)
- */
-const sendAppointmentReminder = async (to, doctor, date, time) => {
-  try {
-    const message = `⏰ Reminder: You have an appointment with Dr. ${doctor} tomorrow at ${time} on ${date}. Reply RESCHEDULE to change.`;
-    const response = await twilioClient.messages.create({
-      body: message,
-      from: twilioPhoneNumber,
-      to,
-    });
-    return response;
-  } catch (error) {
-    logger.error(`⚠️ Twilio Reminder SMS Error: ${error.message}`);
-    throw error;
+// Send booking confirmation
+async function sendBookingConfirmation(phone, doctor, date, time) {
+  if (!isConfigured()) {
+    throw new Error("Twilio credentials not configured");
   }
-};
 
-/**
- * ❌ Send Appointment Cancellation Notification
- */
-const sendCancellationNotification = async (to, doctor, date, time) => {
   try {
-    const message = `❌ Your appointment with Dr. ${doctor} scheduled for ${date} at ${time} has been cancelled. Reply BOOK to schedule a new one.`;
-    const response = await twilioClient.messages.create({
-      body: message,
-      from: twilioPhoneNumber,
-      to,
+    const client = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    const response = await client.messages.create({
+      body: `Your appointment with ${doctor} is confirmed for ${date} at ${time}.`,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: `+${phone.replace(/\D/g, "")}`,
     });
+
+    logger.info(`📱 Sent confirmation to ${phone} (SID: ${response.sid})`);
     return response;
   } catch (error) {
-    logger.error(`⚠️ Twilio Cancellation SMS Error: ${error.message}`);
+    logger.error(`❌ Twilio SMS Error: ${error.message}`);
     throw error;
   }
-};
+}
+
+// Send cancellation notification
+async function sendCancellationNotification(phone, doctor, date, time) {
+  if (!isConfigured()) {
+    logger.warn("Twilio not configured - skipping cancellation SMS");
+    return null;
+  }
+
+  try {
+    const client = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    const response = await client.messages.create({
+      body: `Your appointment with ${doctor} on ${date} at ${time} has been cancelled.`,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: `+${phone.replace(/\D/g, "")}`,
+    });
+
+    logger.info(`📱 Sent cancellation to ${phone} (SID: ${response.sid})`);
+    return response;
+  } catch (error) {
+    logger.error(`❌ Twilio Cancellation Error: ${error.message}`);
+    throw error;
+  }
+}
 
 module.exports = {
+  isConfigured,
   sendBookingConfirmation,
-  sendAppointmentReminder,
   sendCancellationNotification,
 };
