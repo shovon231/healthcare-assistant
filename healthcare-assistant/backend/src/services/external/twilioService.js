@@ -1,11 +1,13 @@
 const twilio = require("twilio");
 const winston = require("winston");
 
+// ✅ Twilio Configuration
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioClient = twilio(accountSid, authToken);
+const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
-// Configure Winston for logging errors
+// ✅ Configure Winston Logger
 const logger = winston.createLogger({
   level: "error",
   format: winston.format.json(),
@@ -16,58 +18,61 @@ const logger = winston.createLogger({
 });
 
 /**
- * Send SMS messages
+ * 📢 Send Booking Confirmation SMS
  */
-const sendSMS = async (to, message) => {
+const sendBookingConfirmation = async (to, doctor, date, time) => {
   try {
+    const message = `✅ Your appointment with Dr. ${doctor} is confirmed for ${date} at ${time}. Reply CANCEL to cancel or RESCHEDULE to change.`;
     const response = await twilioClient.messages.create({
       body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
+      from: twilioPhoneNumber,
       to,
     });
     return response;
   } catch (error) {
-    logger.error(`❌ Error sending SMS: ${error.message}`);
+    logger.error(`⚠️ Twilio SMS Error: ${error.message}`);
     throw error;
   }
 };
 
 /**
- * Make automated phone calls (Twilio Voice API)
+ * 🔔 Send Automatic Appointment Reminder (One Day Before)
  */
-const makeCall = async (to, twimlUrl) => {
+const sendAppointmentReminder = async (to, doctor, date, time) => {
   try {
-    const response = await twilioClient.calls.create({
-      url: twimlUrl,
-      from: process.env.TWILIO_PHONE_NUMBER,
+    const message = `⏰ Reminder: You have an appointment with Dr. ${doctor} tomorrow at ${time} on ${date}. Reply RESCHEDULE to change.`;
+    const response = await twilioClient.messages.create({
+      body: message,
+      from: twilioPhoneNumber,
       to,
     });
     return response;
   } catch (error) {
-    logger.error(`❌ Error making call: ${error.message}`);
+    logger.error(`⚠️ Twilio Reminder SMS Error: ${error.message}`);
     throw error;
   }
 };
 
 /**
- * Send booking confirmation SMS
+ * ❌ Send Appointment Cancellation Notification
  */
-const sendBookingConfirmation = async (to, date, time) => {
-  const message = `✅ Your appointment is confirmed for ${date} at ${time}. Reply CANCEL to cancel or RESCHEDULE to change.`;
-  return sendSMS(to, message);
-};
-
-/**
- * Send automatic appointment reminder SMS (one day before)
- */
-const sendAppointmentReminder = async (to, date, time) => {
-  const message = `⏰ Reminder: Your appointment is tomorrow at ${time} on ${date}. Reply RESCHEDULE to change.`;
-  return sendSMS(to, message);
+const sendCancellationNotification = async (to, doctor, date, time) => {
+  try {
+    const message = `❌ Your appointment with Dr. ${doctor} scheduled for ${date} at ${time} has been cancelled. Reply BOOK to schedule a new one.`;
+    const response = await twilioClient.messages.create({
+      body: message,
+      from: twilioPhoneNumber,
+      to,
+    });
+    return response;
+  } catch (error) {
+    logger.error(`⚠️ Twilio Cancellation SMS Error: ${error.message}`);
+    throw error;
+  }
 };
 
 module.exports = {
-  sendSMS,
-  makeCall,
   sendBookingConfirmation,
   sendAppointmentReminder,
+  sendCancellationNotification,
 };
