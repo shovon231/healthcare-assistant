@@ -91,3 +91,14 @@
 {"level":"info","message":"📝 Stored doctor name: Jackalope. for 14373185589"}
 {"level":"info","message":"🗣️ Appointment Time Captured: today at 3 p.m."}
 {"level":"info","message":"📝 Processing appointment for Dr. Jackalope. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Stop."}
+{"level":"info","message":"📝 Stored doctor name: Stop. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: 1111111."}
+{"level":"info","message":"📝 Processing appointment for Dr. Stop. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: Electrified."}
+{"level":"info","message":"📝 Stored doctor name: Electrified. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 2 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. Electrified. with 14373185589"}
