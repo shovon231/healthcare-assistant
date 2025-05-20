@@ -18,3 +18,9 @@
 {"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Stop.","timestamp":"2025-05-13T20:37:42.134Z"}
 {"level":"info","message":"📱 Sent SMS confirmation to 14373185589","timestamp":"2025-05-14T23:50:47.461Z"}
 {"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Electrified.","timestamp":"2025-05-14T23:50:47.462Z"}
+{"level":"info","message":"📱 Sent SMS confirmation to 14373185589","timestamp":"2025-05-15T00:01:18.289Z"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. La croisette.","timestamp":"2025-05-15T00:01:18.290Z"}
+{"level":"error","message":"❌ Error in createAppointmentService: Appointment validation failed: source: `voice-ai` is not a valid enum value for path `source`.","timestamp":"2025-05-20T00:01:18.853Z"}
+{"level":"error","message":"❌ Error in createAppointmentService: Appointment validation failed: source: `phone` is not a valid enum value for path `source`.","timestamp":"2025-05-20T01:23:07.857Z"}
+{"level":"info","message":"📱 Sent SMS confirmation to 14373185589","timestamp":"2025-05-20T01:46:23.273Z"}
+{"level":"info","message":"✅ Appointment created for 14373185589 with Dr. Dr. Smith","timestamp":"2025-05-20T01:46:23.274Z"}

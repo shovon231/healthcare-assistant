@@ -3,23 +3,23 @@ const express = require("express");
 const mongoose = require("mongoose");
 const winston = require("winston");
 const dotenv = require("dotenv");
-const app = require("./app");
-
+const app = require("./src/app");
+const logger = require("./src/utils/logger");
 // Load environment variables
 dotenv.config();
 
 // Configure Winston Logger
-const logger = winston.createLogger({
-  level: "info",
-  format: winston.format.json(),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({
-      filename: "logs/server.log",
-      level: "error",
-    }),
-  ],
-});
+// const logger = winston.createLogger({
+//   level: "info",
+//   format: winston.format.json(),
+//   transports: [
+//     new winston.transports.Console(),
+//     new winston.transports.File({
+//       filename: "logs/server.log",
+//       level: "error",
+//     }),
+//   ],
+// });
 
 // Define MongoDB Connection URI
 const MONGO_URI =
@@ -48,6 +48,7 @@ process.on("unhandledRejection", (reason, promise) => {
   logger.error(`⚠️ Unhandled Rejection at: ${promise}, reason: ${reason}`);
 });
 
+process.removeAllListeners("warning");
 // Start Server
 server.listen(PORT, () => {
   logger.info(`🚀 Server running on port ${PORT}`);

@@ -100,3 +100,14 @@
 {"level":"info","message":"📝 Stored doctor name: Electrified. for 14373185589"}
 {"level":"info","message":"🗣️ Appointment Time Captured: next Tuesday, 2 p.m."}
 {"level":"info","message":"📝 Processing appointment for Dr. Electrified. with 14373185589"}
+{"level":"info","message":"🧹 Cleared previous session data"}
+{"level":"info","message":"🗣️ Doctor Name Captured: La croisette."}
+{"level":"info","message":"📝 Stored doctor name: La croisette. for 14373185589"}
+{"level":"info","message":"🗣️ Appointment Time Captured: next Monday, at 3 p.m."}
+{"level":"info","message":"📝 Processing appointment for Dr. La croisette. with 14373185589"}
+{"level":"info","message":"🗣️ Voice Input from 14373185589: I want to book an appointment.","timestamp":"2025-05-19T01:20:41.130Z"}
+{"level":"info","message":"🗣️ Voice Input from 14373185589: undefined","timestamp":"2025-05-19T01:20:44.078Z"}
+{"level":"info","message":"🗣️ Voice Input from 14373185589: undefined","timestamp":"2025-05-19T01:20:47.167Z"}
+{"level":"info","message":"🗣️ Voice Input from 14373185589: undefined","timestamp":"2025-05-19T01:20:50.200Z"}
+{"level":"info","message":"🗣️ Voice Input from 14373185589: undefined","timestamp":"2025-05-19T01:20:53.187Z"}
+{"level":"info","message":"🗣️ Voice Input from 14373185589: undefined","timestamp":"2025-05-19T01:20:54.810Z"}
