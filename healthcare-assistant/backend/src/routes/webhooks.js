@@ -20,6 +20,8 @@ const STATES = {
   CONFIRM_INTENT: "confirm_intent",
   COLLECT_DETAILS: "collect_details",
   CONFIRM_APPOINTMENT: "confirm_appointment",
+  EMERGENCY: "emergency",
+  FOLLOW_UP: "follow_up",
 };
 
 /**
@@ -51,7 +53,7 @@ router.post("/twilio", async (req, res) => {
       const details = extractAppointmentDetails(aiResponse, senderPhone);
       if (details) {
         await appointmentController.createAppointmentService(details);
-        responseMessage = `✅ Appointment confirmed with Dr. ${details.doctor} on ${details.date} at ${details.time}`;
+        responseMessage = `✅ Appointment confirmed with Dr. ${details.doctor} on ${details.date} at ${details.time}. We'll send a reminder 24 hours before.`;
       }
     }
 
@@ -70,7 +72,7 @@ router.post("/twilio", async (req, res) => {
       phone: senderPhone,
     });
     twiml.message(
-      "We're experiencing technical difficulties. Please try again later."
+      "We're experiencing technical difficulties. Please try again later or call our front desk at (555) 123-4567."
     );
   }
 
@@ -95,6 +97,7 @@ router.post("/twilio-voice", async (req, res) => {
         state: STATES.GREETING,
         appointmentData: {},
         retries: 0,
+        lastResponse: null,
       };
     }
 
@@ -107,6 +110,14 @@ router.post("/twilio-voice", async (req, res) => {
       retries: req.session.voiceSession.retries,
       callerPhone,
     });
+
+    // Emergency detection
+    if (
+      (speechResult || "").toLowerCase().includes("emergency") ||
+      (speechResult || "").toLowerCase().includes("urgent")
+    ) {
+      req.session.voiceSession.state = STATES.EMERGENCY;
+    }
 
     // Process based on current state
     switch (state) {
@@ -146,6 +157,14 @@ router.post("/twilio-voice", async (req, res) => {
         );
         return;
 
+      case STATES.EMERGENCY:
+        await handleEmergencyState(twiml, req, res);
+        return;
+
+      case STATES.FOLLOW_UP:
+        await handleFollowUpState(twiml, req, res, speechResult, callerPhone);
+        return;
+
       default:
         await resetVoiceSession(twiml, req, res);
         return;
@@ -159,7 +178,7 @@ router.post("/twilio-voice", async (req, res) => {
 
     const errorTwiml = new twilio.twiml.VoiceResponse();
     errorTwiml.say(
-      "We're unable to process your request. Please call back later."
+      "We're unable to process your request right now. Please call back later or dial our front desk directly at (555) 123-4567."
     );
     errorTwiml.hangup();
     res.type("text/xml").send(errorTwiml.toString());
@@ -169,6 +188,16 @@ router.post("/twilio-voice", async (req, res) => {
 // State Handlers
 async function handleGreetingState(twiml, req, res) {
   const response = new twilio.twiml.VoiceResponse();
+
+  const greetings = [
+    "Thank you for calling City Healthcare Center, this is Clara speaking.",
+    "Hello and welcome to City Healthcare, I'm Clara. How can I help you today?",
+    "Good day! You've reached City Healthcare Center, Clara speaking.",
+  ];
+
+  const randomGreeting =
+    greetings[Math.floor(Math.random() * greetings.length)];
+
   const gather = response.gather({
     input: "speech dtmf",
     action: "/api/v1/webhooks/twilio-voice",
@@ -176,7 +205,7 @@ async function handleGreetingState(twiml, req, res) {
     timeout: VOICE_TIMEOUT,
     speechTimeout: "auto",
     language: "en-US",
-    hints: "appointment, book, schedule",
+    hints: "appointment, book, schedule, emergency, question",
     numDigits: 1,
   });
 
@@ -185,7 +214,10 @@ async function handleGreetingState(twiml, req, res) {
       voice: "woman",
       language: "en-US",
     },
-    "Thank you for calling Healthcare Assistant. Are you calling to book an appointment? Press 1 or say yes."
+    `${randomGreeting} Are you calling to book an appointment? 
+    <break time="0.5s"/> 
+    You can say 'yes' or press 1 to continue. 
+    For emergencies, say 'emergency' immediately.`
   );
 
   req.session.voiceSession.state = STATES.CONFIRM_INTENT;
@@ -201,7 +233,7 @@ async function handleConfirmIntentState(
   callerPhone
 ) {
   const response = new twilio.twiml.VoiceResponse();
-  const input = speechResult || digits || "";
+  const input = (speechResult || digits || "").toString().toLowerCase();
 
   if (!input) {
     handleRetryOrExit(
@@ -213,8 +245,15 @@ async function handleConfirmIntentState(
     return;
   }
 
+  // Emergency detection
+  if (input.includes("emergency") || input.includes("urgent")) {
+    req.session.voiceSession.state = STATES.EMERGENCY;
+    await handleEmergencyState(response, req, res);
+    return;
+  }
+
   const positiveResponse = ["yes", "yeah", "yep", "book", "1"].some((word) =>
-    input.toString().toLowerCase().includes(word)
+    input.includes(word)
   );
 
   if (positiveResponse) {
@@ -236,7 +275,9 @@ async function handleConfirmIntentState(
     });
 
     gather.say(
-      "Great! Please tell me the doctor's full name and your preferred date and time. For example, 'I want to see Dr. Smith on May 25th at 2 PM'."
+      `Great! Please tell me the doctor's full name and your preferred date and time. 
+      For example, 'I want to see Dr. Smith on May 25th at 2 PM'. 
+      Or you can say 'next available' for the doctor's soonest opening.`
     );
 
     // Update state
@@ -245,8 +286,22 @@ async function handleConfirmIntentState(
 
     res.type("text/xml").send(collectResponse.toString());
   } else {
-    response.say("How else may I assist you today?");
-    await resetVoiceSession(response, req, res);
+    // Handle other inquiries
+    req.session.voiceSession.state = STATES.FOLLOW_UP;
+    const followUpResponse = new twilio.twiml.VoiceResponse();
+    const gather = followUpResponse.gather({
+      input: "speech",
+      action: "/api/v1/webhooks/twilio-voice",
+      method: "POST",
+      timeout: VOICE_TIMEOUT,
+      speechTimeout: "auto",
+    });
+
+    gather.say(
+      "How else may I assist you today? You can ask about our hours, services, or doctors."
+    );
+
+    res.type("text/xml").send(followUpResponse.toString());
   }
 }
 
@@ -263,7 +318,7 @@ async function handleCollectDetailsState(
     handleRetryOrExit(
       response,
       req,
-      "I didn't catch that. Please tell me the doctor's full name and your preferred date and time."
+      "I didn't catch that. Please tell me the doctor's full name and your preferred date and time, or say 'next available'."
     );
     res.type("text/xml").send(response.toString());
     return;
@@ -298,9 +353,17 @@ async function handleCollectDetailsState(
         numDigits: 1,
       });
 
-      gather.say(
-        `I have: Doctor ${details.doctor}, on ${details.date} at ${details.time}. Is this correct? Press 1 or say yes to confirm.`
-      );
+      const confirmations = [
+        `I have that as Dr. ${details.doctor} on ${details.date} at ${details.time}. Is this correct?`,
+        `Let me confirm: Dr. ${details.doctor} on ${details.date} at ${details.time}. Does that work for you?`,
+        `So that's with Dr. ${details.doctor} on ${details.date} at ${details.time}. Can I book this for you?`,
+      ];
+
+      const randomConfirmation =
+        confirmations[Math.floor(Math.random() * confirmations.length)];
+
+      gather.say(randomConfirmation);
+      gather.say("Press 1 or say yes to confirm.");
 
       // Update conversation history
       req.session.voiceSession.history = [
@@ -311,11 +374,39 @@ async function handleCollectDetailsState(
 
       res.type("text/xml").send(confirmResponse.toString());
     } else {
-      response.say(
-        "I couldn't get all the details. Please say the doctor's full name, date and time together. For example, 'Dr. Smith on May 25th at 2 PM'."
-      );
+      // Determine what's missing
+      const missing = [];
+      if (!speechResult.includes("doctor"))
+        missing.push("Which doctor would you like to see?");
+      if (!speechResult.includes("date"))
+        missing.push("What date works best for you?");
+      if (!speechResult.includes("time"))
+        missing.push("What time of day would you prefer?");
+
+      const followUpResponse = new twilio.twiml.VoiceResponse();
+      const gather = followUpResponse.gather({
+        input: "speech",
+        action: "/api/v1/webhooks/twilio-voice",
+        method: "POST",
+        timeout: VOICE_TIMEOUT,
+        speechTimeout: "auto",
+      });
+
+      if (missing.length === 1) {
+        gather.say(`I just need one more thing. ${missing[0]}`);
+      } else if (missing.length > 1) {
+        gather.say(`I need a few more details to book your appointment. ${missing.join(
+          " "
+        )} 
+          Please tell me one at a time.`);
+      } else {
+        gather.say(
+          "I couldn't get all the details. Please say the doctor's full name, date and time together. For example, 'Dr. Smith on May 25th at 2 PM'."
+        );
+      }
+
       req.session.voiceSession.retries += 1;
-      res.type("text/xml").send(response.toString());
+      res.type("text/xml").send(followUpResponse.toString());
     }
   } catch (error) {
     logger.error("Error in collect details state", {
@@ -340,7 +431,7 @@ async function handleConfirmAppointmentState(
   callerPhone
 ) {
   const response = new twilio.twiml.VoiceResponse();
-  const input = speechResult || digits || "";
+  const input = (speechResult || digits || "").toString().toLowerCase();
 
   if (!input) {
     handleRetryOrExit(response, req, "Please confirm yes or no, or press 1.");
@@ -350,21 +441,28 @@ async function handleConfirmAppointmentState(
 
   try {
     const positiveResponse = ["yes", "yeah", "yep", "1"].some((word) =>
-      input.toString().toLowerCase().includes(word)
+      input.includes(word)
     );
 
     if (positiveResponse) {
-      // Create a copy of appointment data with valid source value
+      // Create appointment
       const appointmentData = {
         ...req.session.voiceSession.appointmentData,
-        source: "voice", // Using correct enum value
+        source: "voice",
       };
 
       await appointmentController.createAppointmentService(appointmentData);
 
-      response.say(
-        "Your appointment is confirmed! A text confirmation will be sent shortly. Goodbye!"
-      );
+      const confirmations = [
+        "Your appointment is confirmed! A text confirmation will be sent shortly. Thank you and goodbye!",
+        "All set! You'll receive a text confirmation soon. Have a wonderful day!",
+        "I've booked your appointment. You'll get a confirmation text with all the details. Goodbye!",
+      ];
+
+      const randomConfirmation =
+        confirmations[Math.floor(Math.random() * confirmations.length)];
+
+      response.say(randomConfirmation);
       response.hangup();
       req.session.voiceSession = null;
       res.type("text/xml").send(response.toString());
@@ -382,9 +480,96 @@ async function handleConfirmAppointmentState(
     });
 
     response.say(
-      "I couldn't confirm your appointment. Please try again later."
+      "I couldn't confirm your appointment. Please try again later or call our front desk at (555) 123-4567."
     );
     response.hangup();
+    res.type("text/xml").send(response.toString());
+  }
+}
+
+async function handleEmergencyState(twiml, req, res) {
+  const response = new twilio.twiml.VoiceResponse();
+
+  response.say(
+    `I'm connecting you to our emergency line immediately. 
+    Please stay on the line. 
+    If this is a life-threatening emergency, please hang up and dial 911.`
+  );
+
+  // Dial your emergency contact number
+  response.dial("+15551234567");
+
+  // Log the emergency
+  logger.warn("Emergency call transferred", {
+    callerPhone: normalizePhoneNumber(req.body.From),
+    timestamp: new Date().toISOString(),
+  });
+
+  res.type("text/xml").send(response.toString());
+}
+
+async function handleFollowUpState(twiml, req, res, speechResult, callerPhone) {
+  const response = new twilio.twiml.VoiceResponse();
+
+  try {
+    if (!speechResult) {
+      handleRetryOrExit(
+        response,
+        req,
+        "I didn't catch that. How else may I assist you today?"
+      );
+      res.type("text/xml").send(response.toString());
+      return;
+    }
+
+    // Generate AI response for general inquiries
+    const aiResponse = await generateAIResponse({
+      message: speechResult,
+      history: req.session.voiceSession.history,
+      phone: callerPhone,
+      mode: "voice-general",
+    });
+
+    const gather = response.gather({
+      input: "speech dtmf",
+      action: "/api/v1/webhooks/twilio-voice",
+      method: "POST",
+      timeout: VOICE_TIMEOUT,
+      speechTimeout: "auto",
+      numDigits: 1,
+    });
+
+    gather.say(aiResponse);
+    gather.say(
+      "Is there anything else I can help with? Press 1 or say yes to continue."
+    );
+
+    // Update conversation history
+    req.session.voiceSession.history = [
+      ...req.session.voiceSession.history.slice(-MAX_CONVERSATION_HISTORY),
+      { role: "user", content: speechResult },
+      { role: "assistant", content: aiResponse },
+    ];
+
+    res.type("text/xml").send(response.toString());
+  } catch (error) {
+    logger.error("Error in follow-up state", {
+      error: error.message,
+      stack: error.stack,
+      callerPhone,
+    });
+
+    response.say(
+      "I'm having trouble answering that. Would you like to speak to a receptionist?"
+    );
+
+    const gather = response.gather({
+      input: "dtmf",
+      action: "/api/v1/webhooks/twilio-voice",
+      method: "POST",
+      numDigits: 1,
+    });
+
     res.type("text/xml").send(response.toString());
   }
 }
@@ -392,8 +577,23 @@ async function handleConfirmAppointmentState(
 // Helper Functions
 function handleRetryOrExit(twiml, req, message) {
   if (req.session.voiceSession.retries >= MAX_RETRIES) {
-    twiml.say("We're having trouble connecting. Please call back later.");
-    twiml.hangup();
+    const responses = [
+      "We're having trouble connecting. Please call back later.",
+      "I'm having difficulty understanding. Please call our front desk at (555) 123-4567.",
+      "Let me transfer you to a receptionist who can help.",
+    ];
+
+    const randomResponse =
+      responses[Math.floor(Math.random() * responses.length)];
+
+    twiml.say(randomResponse);
+
+    if (randomResponse.includes("transfer")) {
+      twiml.dial("+15551234567");
+    } else {
+      twiml.hangup();
+    }
+
     req.session.voiceSession = null;
   } else {
     twiml.say(message);
