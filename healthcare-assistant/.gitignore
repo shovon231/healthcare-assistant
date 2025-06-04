@@ -1,3 +1,7 @@
-secret.txt
-logs/
+node_modules/
 .env
+.DS_Store
+logs/
+*.log
+.idea/
+.vscode/

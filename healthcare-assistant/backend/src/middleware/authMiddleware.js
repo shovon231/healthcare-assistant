@@ -1,24 +1,42 @@
 const jwt = require("jsonwebtoken");
+const { AppError } = require("../utils/errorHandler");
+const logger = require("../utils/logger");
 
-const authMiddleware = (req, res, next) => {
-  const token = req.header("Authorization");
+const protect = (req, res, next) => {
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    token = req.headers.authorization.split(" ")[1];
+  }
 
   if (!token) {
-    return res
-      .status(401)
-      .json({ success: false, message: "Access denied. No token provided." });
+    return next(new AppError("Not authorized to access this route", 401));
   }
 
   try {
-    const decoded = jwt.verify(
-      token.replace("Bearer ", ""),
-      process.env.JWT_SECRET
-    );
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
-  } catch (error) {
-    res.status(400).json({ success: false, message: "Invalid token." });
+  } catch (err) {
+    logger.error(`JWT verification error: ${err.message}`);
+    return next(new AppError("Not authorized to access this route", 401));
   }
 };
 
-module.exports = authMiddleware;
+const authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return next(
+        new AppError(`User role ${req.user.role} is not authorized`, 403)
+      );
+    }
+    next();
+  };
+};
+
+module.exports = {
+  protect,
+  authorize,
+};

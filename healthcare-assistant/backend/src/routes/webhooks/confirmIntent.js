@@ -1,46 +1,73 @@
-const twilio = require("twilio");
-const { STATES } = require("../constants");
-const { handleRetryOrExit } = require("../voiceUtils");
-const collectDetailsHandler = require("./collectDetails");
-const followUpHandler = require("./followUp");
+const { AppError } = require("../../utils/errorHandler");
+const logger = require("../../utils/logger");
+const stateManager = require("../../utils/stateManager");
+const aiService = require("../../services/external/ai/aiService");
+const Appointment = require("../../models/Appointment");
 
-module.exports = {
-  handleState: async (req, res, twiml, callerPhone) => {
-    const input = (req.body.SpeechResult || req.body.Digits || "")
-      .toString()
-      .toLowerCase();
+module.exports = async (req, res, next) => {
+  try {
+    const { From: phoneNumber, Body: userInput } = req.body;
+    const { sessionId } = req.query;
 
-    if (!input) {
-      handleRetryOrExit(
-        twiml,
-        req,
-        "I didn't hear your response. Please say yes or no, or press 1."
-      );
-      return res.type("text/xml").send(twiml.toString());
+    // Get session
+    const session = stateManager.getSession(sessionId);
+    if (!session || session.phoneNumber !== phoneNumber) {
+      return next(new AppError("Invalid session", 400));
     }
 
-    // Emergency detection
-    if (input.includes("emergency") || input.includes("urgent")) {
-      req.session.voiceSession.state = STATES.EMERGENCY;
-      return emergencyHandler.handleState(req, res, twiml, callerPhone);
-    }
-
-    const positiveResponse = ["yes", "yeah", "yep", "book", "1"].some((word) =>
-      input.includes(word)
+    // Process confirmation with AI
+    const confirmationResult = await aiService.processConfirmation(
+      phoneNumber,
+      userInput,
+      session.context
     );
 
-    if (positiveResponse) {
-      req.session.voiceSession.history = [
-        ...req.session.voiceSession.history.slice(-MAX_CONVERSATION_HISTORY),
-        { role: "user", content: "Yes, I want to book an appointment" },
-        { role: "assistant", content: "Requesting appointment details" },
-      ];
+    if (confirmationResult.confirmed) {
+      // Create appointment
+      const appointment = new Appointment({
+        patient: confirmationResult.context.patientId,
+        doctor: confirmationResult.context.doctorId,
+        date: confirmationResult.context.appointmentTime,
+        reason: confirmationResult.context.reason,
+        status: "pending",
+        source: "assistant",
+      });
 
-      req.session.voiceSession.state = STATES.COLLECT_DETAILS;
-      return collectDetailsHandler.handleState(req, res, twiml, callerPhone);
-    } else {
-      req.session.voiceSession.state = STATES.FOLLOW_UP;
-      return followUpHandler.handleState(req, res, twiml, callerPhone);
+      await appointment.save();
+
+      // Update session
+      stateManager.updateSession(sessionId, {
+        state: "completed",
+        context: {
+          ...session.context,
+          appointmentId: appointment._id,
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: confirmationResult.message,
+        appointmentId: appointment._id,
+        sessionId: session.id,
+        requiresManualConfirmation:
+          confirmationResult.requiresManualConfirmation,
+      });
     }
-  },
+
+    // If not confirmed, update session and continue
+    stateManager.updateSession(sessionId, {
+      context: confirmationResult.updatedContext,
+      state: confirmationResult.nextState,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: confirmationResult.message,
+      nextStep: confirmationResult.nextStep,
+      sessionId: session.id,
+    });
+  } catch (err) {
+    logger.error(`Error in confirm intent webhook: ${err.message}`);
+    next(err);
+  }
 };

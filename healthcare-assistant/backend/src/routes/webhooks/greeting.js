@@ -1,57 +1,35 @@
-const twilio = require("twilio");
-const { STATES } = require("../constants");
-const { getRandomGreeting, handleRetryOrExit } = require("../voiceUtils");
-const confirmIntentHandler = require("./confirmIntent");
+const { AppError } = require("../../utils/errorHandler");
+const logger = require("../../utils/logger");
+const stateManager = require("../../utils/stateManager");
+const aiService = require("../../services/external/ai/aiService");
 
-module.exports = {
-  handleState: async (req, res) => {
-    const twiml = new twilio.twiml.VoiceResponse();
-    const callerPhone = normalizePhoneNumber(req.body.From);
+module.exports = async (req, res, next) => {
+  try {
+    const { From: phoneNumber } = req.body;
 
-    try {
-      // Initialize or reset voice session
-      if (
-        !req.session.voiceSession ||
-        req.session.voiceSession.state === STATES.GREETING
-      ) {
-        req.session.voiceSession = {
-          history: [],
-          state: STATES.GREETING,
-          appointmentData: {},
-          retries: 0,
-          lastResponse: null,
-        };
-      }
+    // Create a new session
+    const session = stateManager.createSession(phoneNumber);
 
-      const gather = twiml.gather({
-        input: "speech dtmf",
-        action: "/api/v1/webhooks/twilio-voice",
-        method: "POST",
-        timeout: VOICE_TIMEOUT,
-        speechTimeout: "auto",
-        language: "en-US",
-        hints: "appointment, book, schedule, emergency, question",
-        numDigits: 1,
-      });
+    // Get greeting response from AI service
+    const greetingResponse = await aiService.generateGreeting(phoneNumber);
 
-      gather.say(
-        { voice: "woman", language: "en-US" },
-        `${getRandomGreeting()} Are you calling to book an appointment? 
-        <break time="0.5s"/> 
-        You can say 'yes' or press 1 to continue. 
-        For emergencies, say 'emergency' immediately.`
-      );
+    // Update session state
+    stateManager.updateSession(session.id, {
+      state: "collecting_details",
+      context: {
+        ...greetingResponse.context,
+        currentStep: "name",
+      },
+    });
 
-      req.session.voiceSession.state = STATES.CONFIRM_INTENT;
-      res.type("text/xml").send(twiml.toString());
-    } catch (error) {
-      logger.error("Greeting state error", { error, callerPhone });
-      handleRetryOrExit(
-        twiml,
-        req,
-        "We're having technical difficulties. Please try again."
-      );
-      res.type("text/xml").send(twiml.toString());
-    }
-  },
+    res.status(200).json({
+      success: true,
+      message: greetingResponse.message,
+      sessionId: session.id,
+      nextStep: "collect_name",
+    });
+  } catch (err) {
+    logger.error(`Error in greeting webhook: ${err.message}`);
+    next(err);
+  }
 };

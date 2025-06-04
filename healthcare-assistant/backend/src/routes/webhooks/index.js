@@ -1,12 +1,18 @@
 const express = require("express");
 const router = express.Router();
+const greetingHandler = require("./greeting");
+const collectDetailsHandler = require("./collectDetails");
+const confirmIntentHandler = require("./confirmIntent");
+const followUpHandler = require("./followUp");
 const smsHandler = require("./smsHandler");
-const voiceHandler = require("./voiceHandlers/greeting");
+const voiceHandler = require("./voiceHandler");
 
-// Twilio SMS Webhook Handler
-router.post("/twilio", smsHandler.handleSmsWebhook);
-
-// Twilio Voice Webhook Handler - Starts with greeting state
-router.post("/twilio-voice", voiceHandler.handleState);
+// Webhook endpoints
+router.post("/greeting", greetingHandler);
+router.post("/collect-details", collectDetailsHandler);
+router.post("/confirm-intent", confirmIntentHandler);
+router.post("/follow-up", followUpHandler);
+router.post("/sms", smsHandler);
+router.post("/voice", voiceHandler);
 
 module.exports = router;

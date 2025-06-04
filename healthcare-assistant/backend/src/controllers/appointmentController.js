@@ -1,362 +1,196 @@
 const Appointment = require("../models/Appointment");
-const twilioService = require("../services/external/twilioService");
-const winston = require("winston");
-const { v4: uuidv4 } = require("uuid");
-const chrono = require("chrono-node");
+const Patient = require("../models/Patient");
+const Doctor = require("../models/Doctor");
+const { AppError } = require("../utils/errorHandler");
+const logger = require("../utils/logger");
+const { formatDate } = require("../utils/dateUtils");
+const stateManager = require("../utils/stateManager");
+const aiService = require("../services/external/ai/aiService");
 
-// Configure Winston Logger
-const logger = winston.createLogger({
-  level: "info",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.simple(),
-    }),
-    new winston.transports.File({
-      filename: "logs/appointments.log",
-      level: "info",
-    }),
-  ],
-});
-
-// Utility Functions
-const generateTemporaryPatientId = (phone) => {
-  const cleanPhone = phone.replace(/\D/g, "");
-  return `temp-${cleanPhone}-${uuidv4().slice(0, 8)}`;
-};
-
-const parseVoiceDateTime = (timeString) => {
+const createAppointment = async (req, res, next) => {
   try {
-    const parsedDate = chrono.parseDate(timeString);
-    if (parsedDate) {
-      return {
-        date: parsedDate.toISOString().split("T")[0],
-        time: parsedDate.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        datetime: parsedDate,
-      };
-    }
-  } catch (error) {
-    logger.warn(`⚠️ Falling back to simple date parsing: ${error.message}`);
-  }
+    const { patientId, doctorId, date, reason } = req.body;
 
-  // Fallback to simple parsing
-  const now = new Date();
-  const isTomorrow = timeString.toLowerCase().includes("tomorrow");
-
-  if (isTomorrow) {
-    now.setDate(now.getDate() + 1);
-  }
-
-  const timeMatch = timeString.match(/(\d{1,2})(?::\d{2})?\s?(am|pm)?/i);
-  if (timeMatch) {
-    let hours = parseInt(timeMatch[1]);
-    const period = timeMatch[2] ? timeMatch[2].toLowerCase() : null;
-
-    if (period === "pm" && hours < 12) hours += 12;
-    if (period === "am" && hours === 12) hours = 0;
-
-    now.setHours(hours);
-    now.setMinutes(0);
-  }
-
-  return {
-    date: now.toISOString().split("T")[0],
-    time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    datetime: now,
-  };
-};
-
-// Service Function with Enhanced Twilio Handling
-const createAppointmentService = async (appointmentData) => {
-  try {
-    let { patientId, doctor, date, time, phone } = appointmentData;
-
-    // Validate required fields
-    if (!doctor || !phone) {
-      throw new Error("Doctor name and phone number are required");
+    // Check if patient exists
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return next(new AppError("Patient not found", 404));
     }
 
-    // Handle voice commands
-    if ((!date || !time) && appointmentData.voiceDateTime) {
-      const parsed = parseVoiceDateTime(appointmentData.voiceDateTime);
-      date = parsed.date;
-      time = parsed.time;
+    // Check if doctor exists
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return next(new AppError("Doctor not found", 404));
     }
 
-    if (!date || !time) {
-      throw new Error("Date and time are required");
-    }
-
-    // Generate temporary patient ID if not provided
-    if (!patientId) {
-      patientId = generateTemporaryPatientId(phone);
-    }
-
-    // Create the appointment
-    const appointment = await Appointment.create({
-      patientId,
-      doctor: doctor.trim(),
-      date,
-      time,
-      phone: phone.replace(/\D/g, ""),
-      status: "confirmed",
-      source: appointmentData.source || "voice",
+    // Check if slot is available
+    const conflictingAppointment = await Appointment.findOne({
+      doctor: doctorId,
+      date: { $lte: new Date(date) },
+      endDate: { $gt: new Date(date) },
+      status: { $in: ["pending", "confirmed"] },
     });
 
-    // Send confirmation if Twilio is configured
-    try {
-      if (twilioService.isConfigured()) {
-        await twilioService.sendBookingConfirmation(phone, doctor, date, time);
-        logger.info(`📱 Sent SMS confirmation to ${phone}`);
-      } else {
-        logger.warn("Twilio not configured - skipping SMS notification");
-      }
-    } catch (twilioError) {
-      logger.error(`⚠️ Twilio notification failed: ${twilioError.message}`);
-      // Don't fail the appointment creation if Twilio fails
+    if (conflictingAppointment) {
+      return next(new AppError("Time slot is not available", 400));
     }
 
-    logger.info(`✅ Appointment created for ${phone} with Dr. ${doctor}`);
-    return appointment;
-  } catch (error) {
-    logger.error(`❌ Error in createAppointmentService: ${error.message}`);
-    throw error;
-  }
-};
+    const appointment = await Appointment.create({
+      patient: patientId,
+      doctor: doctorId,
+      date,
+      reason,
+      status: "pending",
+    });
 
-// Express Controller for HTTP Requests
-const createAppointment = async (req, res) => {
-  try {
-    const appointment = await createAppointmentService(req.body);
     res.status(201).json({
       success: true,
       data: appointment,
-      message: "Appointment created successfully",
     });
-  } catch (error) {
-    logger.error(`❌ Error in createAppointment: ${error.message}`);
-    res.status(400).json({
-      success: false,
-      message: error.message.includes("required")
-        ? error.message
-        : "Failed to create appointment",
-    });
+  } catch (err) {
+    logger.error(`Error creating appointment: ${err.message}`);
+    next(err);
   }
 };
 
-// Get All Appointments with Enhanced Filtering
-const getAppointments = async (req, res) => {
+const getAvailableSlots = async (req, res, next) => {
   try {
-    const { doctor, phone, date, status, page = 1, limit = 10 } = req.query;
-    const query = {};
+    const { doctorId, date } = req.query;
 
-    if (doctor) query.doctor = new RegExp(doctor, "i");
-    if (phone) query.phone = phone.replace(/\D/g, "");
-    if (date) query.date = date;
-    if (status) query.status = status;
-
-    const options = {
-      skip: (page - 1) * limit,
-      limit: parseInt(limit),
-      sort: { date: 1, time: 1 },
-    };
-
-    const [appointments, total] = await Promise.all([
-      Appointment.find(query, null, options),
-      Appointment.countDocuments(query),
-    ]);
-
-    res.status(200).json({
-      success: true,
-      data: appointments,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit),
-      },
-    });
-  } catch (error) {
-    logger.error(`❌ Error retrieving appointments: ${error.message}`);
-    res.status(500).json({
-      success: false,
-      message: "Failed to retrieve appointments",
-    });
-  }
-};
-
-// Update Appointment with Validation
-const updateAppointment = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updateData = req.body;
-
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Appointment ID is required",
-      });
+    if (!doctorId || !date) {
+      return next(new AppError("Doctor ID and date are required", 400));
     }
 
-    const appointment = await Appointment.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: "Appointment not found",
-      });
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return next(new AppError("Doctor not found", 404));
     }
 
-    // Send update confirmation if Twilio is configured
-    try {
-      if (
-        twilioService.isConfigured() &&
-        (updateData.date || updateData.time || updateData.doctor)
-      ) {
-        await twilioService.sendBookingConfirmation(
-          appointment.phone,
-          appointment.doctor,
-          appointment.date,
-          appointment.time
-        );
-        logger.info(`📱 Sent update notification to ${appointment.phone}`);
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + 1);
+
+    // Get existing appointments for the day
+    const appointments = await Appointment.find({
+      doctor: doctorId,
+      date: { $gte: startDate, $lt: endDate },
+      status: { $in: ["pending", "confirmed"] },
+    }).sort("date");
+
+    // Generate available slots (simplified - in production you'd use the doctor's working hours)
+    const slots = [];
+    const startTime = new Date(startDate);
+    startTime.setHours(9, 0, 0, 0); // 9 AM
+    const endTime = new Date(startDate);
+    endTime.setHours(17, 0, 0, 0); // 5 PM
+
+    let currentTime = new Date(startTime);
+    while (currentTime < endTime) {
+      const slotEnd = new Date(currentTime);
+      slotEnd.setMinutes(currentTime.getMinutes() + 30);
+
+      // Check if this slot is booked
+      const isBooked = appointments.some((appt) => {
+        return appt.date < slotEnd && new Date(appt.endDate) > currentTime;
+      });
+
+      if (!isBooked) {
+        slots.push({
+          start: new Date(currentTime),
+          end: new Date(slotEnd),
+          formattedTime: formatDate(currentTime, "h:mm A"),
+        });
       }
-    } catch (twilioError) {
-      logger.error(
-        `⚠️ Twilio update notification failed: ${twilioError.message}`
-      );
+
+      currentTime.setMinutes(currentTime.getMinutes() + 30);
     }
 
     res.status(200).json({
       success: true,
-      data: appointment,
-      message: "Appointment updated successfully",
+      data: slots,
     });
-  } catch (error) {
-    logger.error(`❌ Error updating appointment: ${error.message}`);
-    res.status(500).json({
-      success: false,
-      message:
-        error.name === "ValidationError"
-          ? error.message
-          : "Failed to update appointment",
-    });
+  } catch (err) {
+    logger.error(`Error getting available slots: ${err.message}`);
+    next(err);
   }
 };
 
-// Cancel Appointment with Enhanced Checks
-const deleteAppointment = async (req, res) => {
+const confirmAppointment = async (req, res, next) => {
   try {
-    const { id } = req.params;
-
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Appointment ID is required",
-      });
-    }
+    const { appointmentId } = req.params;
+    const { sessionId } = req.body;
 
     const appointment = await Appointment.findByIdAndUpdate(
-      id,
-      { status: "cancelled" },
-      { new: true }
-    );
+      appointmentId,
+      { status: "confirmed" },
+      { new: true, runValidators: true }
+    ).populate("patient doctor");
 
     if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: "Appointment not found",
-      });
+      return next(new AppError("Appointment not found", 404));
     }
 
-    // Send cancellation notification if Twilio is configured
-    try {
-      if (twilioService.isConfigured()) {
-        await twilioService.sendCancellationNotification(
-          appointment.phone,
-          appointment.doctor,
-          appointment.date,
-          appointment.time
-        );
-        logger.info(`📱 Sent cancellation to ${appointment.phone}`);
-      }
-    } catch (twilioError) {
-      logger.error(
-        `⚠️ Twilio cancellation notification failed: ${twilioError.message}`
-      );
+    // If this was from a voice session, clean up
+    if (sessionId) {
+      stateManager.deleteSession(sessionId);
     }
+
+    // Here you would typically send a confirmation to the patient
+    // via SMS, email, etc. (implementation would use Twilio, etc.)
 
     res.status(200).json({
       success: true,
       data: appointment,
-      message: "Appointment cancelled successfully",
     });
-  } catch (error) {
-    logger.error(`❌ Error cancelling appointment: ${error.message}`);
-    res.status(500).json({
-      success: false,
-      message: "Failed to cancel appointment",
-    });
+  } catch (err) {
+    logger.error(`Error confirming appointment: ${err.message}`);
+    next(err);
   }
 };
 
-// Cancel Appointment by Phone with Improved Response
-const cancelAppointmentByPhone = async (phoneNumber) => {
+const handleVoiceAppointment = async (req, res, next) => {
   try {
-    const cleanPhone = phoneNumber.replace(/\D/g, "");
+    const { phoneNumber, intent, context } = req.body;
 
-    const appointment = await Appointment.findOneAndUpdate(
-      { phone: cleanPhone, status: { $ne: "cancelled" } },
-      { status: "cancelled" },
-      { new: true }
+    // Get or create session
+    let session;
+    if (context.sessionId) {
+      session = stateManager.getSession(context.sessionId);
+    }
+
+    if (!session) {
+      session = stateManager.createSession(phoneNumber);
+    }
+
+    // Process with AI service
+    const aiResponse = await aiService.processVoiceInteraction(
+      phoneNumber,
+      intent,
+      context,
+      session
     );
 
-    if (!appointment) {
-      throw new Error("No active appointment found for this phone number.");
-    }
+    // Update session
+    stateManager.updateSession(session.id, {
+      state: aiResponse.nextState,
+      context: aiResponse.updatedContext,
+    });
 
-    // Send cancellation notification if Twilio is configured
-    try {
-      if (twilioService.isConfigured()) {
-        await twilioService.sendCancellationNotification(
-          appointment.phone,
-          appointment.doctor,
-          appointment.date,
-          appointment.time
-        );
-        logger.info(`📱 Sent cancellation to ${appointment.phone}`);
-      }
-    } catch (twilioError) {
-      logger.error(
-        `⚠️ Twilio cancellation notification failed: ${twilioError.message}`
-      );
-    }
-
-    return {
+    res.status(200).json({
       success: true,
-      message: `Your appointment with Dr. ${appointment.doctor} on ${appointment.date} at ${appointment.time} has been cancelled.`,
-      appointment,
-    };
-  } catch (error) {
-    logger.error(`❌ Error cancelling appointment by phone: ${error.message}`);
-    throw error;
+      data: aiResponse,
+      sessionId: session.id,
+    });
+  } catch (err) {
+    logger.error(`Error handling voice appointment: ${err.message}`);
+    next(err);
   }
 };
 
 module.exports = {
-  createAppointmentService,
   createAppointment,
-  getAppointments,
-  updateAppointment,
-  deleteAppointment,
-  cancelAppointmentByPhone,
+  getAvailableSlots,
+  confirmAppointment,
+  handleVoiceAppointment,
 };

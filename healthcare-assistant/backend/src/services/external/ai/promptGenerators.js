@@ -1,83 +1,50 @@
-const { format } = require("date-fns");
-const { CLINIC_CONFIG } = require("./data/clinicConfig");
-const { normalizePhone } = require("./utils/phoneUtils");
-const {
-  formatOperatingHours,
-  formatDoctorsList,
-} = require("./utils/doctorUtils");
+const clinicConfig = require("./data/clinicConfig");
 
-function generateSystemPrompt(mode, patientContext, message, phone) {
-  const currentDate = format(new Date(), "EEEE, MMMM do, yyyy");
-  const currentTime = format(new Date(), "h:mm a");
-  const contextPrompt = buildContextPrompt(patientContext);
+const generatePrompt = (context, currentStep) => {
+  let prompt;
 
-  const promptTemplates = {
-    "voice-appointment": `You are Clara, an appointment booking assistant at ${
-      CLINIC_CONFIG.name
-    }. 
-Current Date: ${currentDate}, Time: ${currentTime}
-${contextPrompt}
+  switch (currentStep) {
+    case "greeting":
+      prompt = `You are a virtual assistant for ${clinicConfig.clinicName}, a ${
+        clinicConfig.clinicType
+      } clinic. 
+      The patient's name is ${context.patientName || "not provided yet"}. 
+      Greet the patient and ask how you can help them today.`;
+      break;
 
-Extract appointment details in JSON format with these REQUIRED fields:
-{
-  "doctor": "Full name (must be one of: ${Object.keys(
-    CLINIC_CONFIG.doctors
-  ).join(", ")})",
-  "date": "MM/DD/YYYY (must be today or later)",
-  "time": "HH:MM AM/PM (during clinic hours)",
-  "reason": "Brief reason for visit",
-  "patientPhone": "${normalizePhone(phone)}"
-}
+    case "collect_name":
+      prompt = `Ask the patient for their full name in a friendly way.`;
+      break;
 
-RULES:
-1. DOCTOR MUST be one of our doctors
-2. DATE must be valid and not in the past
-3. TIME must be during clinic hours
-4. If unsure, ask for clarification
-5. For "next available", calculate actual next slot
+    case "collect_phone":
+      prompt = `Ask the patient for their phone number to continue. Make it clear this is for appointment reminders and contact purposes.`;
+      break;
 
-User Request: "${message}"`,
+    case "collect_reason":
+      prompt = `Ask the patient for the reason of their visit. You can mention common reasons like "routine check-up", "follow-up visit", or "specific symptoms".`;
+      break;
 
-    "voice-general": `You are Clara, an AI healthcare assistant at ${
-      CLINIC_CONFIG.name
-    }.
-Current Date: ${currentDate}
-${contextPrompt}
+    case "collect_preferred_time":
+      prompt = `Ask the patient when they would like to schedule their appointment. 
+      Provide examples like "tomorrow morning", "next Monday at 2 PM", or "as soon as possible".`;
+      break;
 
-Respond concisely to general inquiries about:
-- Clinic hours: ${formatOperatingHours()}
-- Services: ${CLINIC_CONFIG.services.join(", ")}
-- Doctors: ${formatDoctorsList()}
-- Insurance: ${CLINIC_CONFIG.insurance.join(", ")}
+    case "confirm_appointment":
+      prompt = `Summarize the appointment details and ask for confirmation:
+      - Doctor: Dr. ${context.doctorName}
+      - Date/Time: ${context.appointmentTimeFormatted}
+      - Reason: ${context.reason}
+      
+      Ask if this appointment works for them.`;
+      break;
 
-For appointments, direct to booking flow.
+    default:
+      prompt = `The patient said: "${context.lastInput}". Respond appropriately based on the conversation history.`;
+  }
 
-User Question: "${message}"`,
-
-    text: `You are Clara, an AI healthcare assistant at ${CLINIC_CONFIG.name}.
-Current Date: ${currentDate}
-${contextPrompt}
-
-Guidelines:
-- Respond professionally but conversationally
-- Use simple language and occasional emojis (✅, ⚕️)
-- For appointments, confirm details before showing [APPOINTMENT] tag
-- Keep responses under 300 characters
-
-User Message: "${message}"`,
-  };
-
-  return promptTemplates[mode] || promptTemplates.text;
-}
-
-function buildContextPrompt(patientContext) {
-  if (!patientContext) return "New patient";
-  return `Returning patient: ${patientContext.name}
-Last visit: ${patientContext.lastVisit}
-Insurance: ${patientContext.insurance}`;
-}
+  return prompt;
+};
 
 module.exports = {
-  generateSystemPrompt,
-  buildContextPrompt,
+  generatePrompt,
 };

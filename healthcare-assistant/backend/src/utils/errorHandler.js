@@ -1,13 +1,29 @@
+const logger = require("./logger");
+
 const errorHandler = (err, req, res, next) => {
-  console.error("❌ Error:", err.message);
-  res.status(err.statusCode || 500).json({
+  logger.error(err.stack);
+
+  const statusCode = err.statusCode || 500;
+  const message = err.message || "Internal Server Error";
+
+  res.status(statusCode).json({
     success: false,
-    message: err.message || "Internal Server Error"
+    statusCode,
+    message,
+    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
   });
 };
 
-const notFoundHandler = (req, res, next) => {
-  res.status(404).json({ success: false, message: "Route not found" });
-};
+class AppError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.statusCode = statusCode || 500;
+    this.isOperational = true;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
 
-module.exports = { errorHandler, notFoundHandler };
+module.exports = {
+  errorHandler,
+  AppError,
+};

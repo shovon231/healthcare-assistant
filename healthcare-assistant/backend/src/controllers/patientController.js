@@ -1,39 +1,93 @@
 const Patient = require("../models/Patient");
+const { AppError } = require("../utils/errorHandler");
+const logger = require("../utils/logger");
+const { validatePhoneNumber } = require("../utils/phoneUtils");
 
-exports.createPatient = async (req, res) => {
+const createPatient = async (req, res, next) => {
   try {
-    const patient = await Patient.create(req.body);
-    res.status(201).json({ success: true, data: patient });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+    const { name, phone, email, dateOfBirth } = req.body;
 
-exports.getPatients = async (req, res) => {
-  try {
-    const patients = await Patient.find();
-    res.status(200).json({ success: true, data: patients });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+    // Validate phone number
+    if (!validatePhoneNumber(phone)) {
+      return next(new AppError("Invalid phone number", 400));
+    }
 
-exports.updatePatient = async (req, res) => {
-  try {
-    const patient = await Patient.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
+    // Check if patient already exists
+    const existingPatient = await Patient.findOne({ phone });
+    if (existingPatient) {
+      return res.status(200).json({
+        success: true,
+        data: existingPatient,
+        message: "Patient already exists",
+      });
+    }
+
+    const patient = await Patient.create({
+      name,
+      phone,
+      email,
+      dateOfBirth,
     });
-    res.status(200).json({ success: true, data: patient });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+
+    res.status(201).json({
+      success: true,
+      data: patient,
+    });
+  } catch (err) {
+    logger.error(`Error creating patient: ${err.message}`);
+    next(err);
   }
 };
 
-exports.deletePatient = async (req, res) => {
+const getPatientByPhone = async (req, res, next) => {
   try {
-    await Patient.findByIdAndDelete(req.params.id);
-    res.status(200).json({ success: true, message: "Patient deleted" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const { phone } = req.params;
+
+    const patient = await Patient.findOne({ phone });
+    if (!patient) {
+      return next(new AppError("Patient not found", 404));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: patient,
+    });
+  } catch (err) {
+    logger.error(`Error getting patient by phone: ${err.message}`);
+    next(err);
   }
+};
+
+const updatePatient = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    // Remove immutable fields
+    delete updates.phone;
+    delete updates.createdAt;
+
+    const patient = await Patient.findByIdAndUpdate(id, updates, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!patient) {
+      return next(new AppError("Patient not found", 404));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: patient,
+    });
+  } catch (err) {
+    logger.error(`Error updating patient: ${err.message}`);
+    next(err);
+  }
+};
+
+module.exports = {
+  createPatient,
+  getPatientByPhone,
+  updatePatient,
 };

@@ -14,33 +14,27 @@ module.exports = async (req, res, next) => {
       return next(new AppError("Invalid session", 400));
     }
 
-    // Process user input with AI
-    const processingResult = await aiService.processUserInput(
+    // Process follow-up with AI
+    const followUpResult = await aiService.processFollowUp(
       phoneNumber,
       userInput,
-      session.context.currentStep,
       session.context
     );
 
     // Update session
-    const updatedSession = stateManager.updateSession(sessionId, {
-      context: {
-        ...session.context,
-        ...processingResult.updatedContext,
-        currentStep: processingResult.nextStep,
-      },
-      state: processingResult.nextState || session.state,
+    stateManager.updateSession(sessionId, {
+      context: followUpResult.updatedContext,
+      state: followUpResult.nextState,
     });
 
     res.status(200).json({
       success: true,
-      message: processingResult.message,
-      nextStep: processingResult.nextStep,
+      message: followUpResult.message,
+      nextStep: followUpResult.nextStep,
       sessionId: session.id,
-      context: updatedSession.context,
     });
   } catch (err) {
-    logger.error(`Error in collect details webhook: ${err.message}`);
+    logger.error(`Error in follow-up webhook: ${err.message}`);
     next(err);
   }
 };

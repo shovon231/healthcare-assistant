@@ -1,51 +1,77 @@
 const twilio = require("twilio");
-const { MAX_CONVERSATION_HISTORY } = require("./constants");
-const { generateAIResponse } = require("../../services/aiService");
-const appointmentController = require("../../controllers/appointmentController");
-const { normalizePhoneNumber } = require("../../utils/helpers");
+const { AppError } = require("../../utils/errorHandler");
+const logger = require("../../utils/logger");
+const stateManager = require("../../utils/stateManager");
+const aiService = require("../../services/external/ai/aiService");
+const twilioService = require("../../services/external/twilioService");
 
-module.exports = {
-  handleSmsWebhook: async (req, res) => {
-    const twiml = new twilio.twiml.MessagingResponse();
-    const messageBody = req.body.Body.trim();
-    const senderPhone = normalizePhoneNumber(req.body.From);
+module.exports = async (req, res, next) => {
+  try {
+    const { From: phoneNumber, Body: message } = req.body;
 
-    try {
-      req.session.conversation = req.session.conversation || {
-        history: [],
-        context: {},
-      };
+    // Check if this is part of an existing session
+    let session;
+    const activeSessions = Array.from(stateManager.sessions.values());
+    session = activeSessions.find((s) => s.phoneNumber === phoneNumber);
 
-      const aiResponse = await generateAIResponse({
-        message: messageBody,
-        history: req.session.conversation.history,
-        phone: senderPhone,
-        mode: "text",
-      });
-
-      let responseMessage = aiResponse;
-      if (aiResponse.includes("[APPOINTMENT]")) {
-        const details = extractAppointmentDetails(aiResponse, senderPhone);
-        if (details) {
-          await appointmentController.createAppointmentService(details);
-          responseMessage = `✅ Appointment confirmed with Dr. ${details.doctor} on ${details.date} at ${details.time}.`;
-        }
+    let response;
+    if (session) {
+      // Continue existing conversation
+      switch (session.state) {
+        case "collecting_details":
+          response = await aiService.processUserInput(
+            phoneNumber,
+            message,
+            session.context.currentStep,
+            session.context
+          );
+          break;
+        case "confirming_appointment":
+          response = await aiService.processConfirmation(
+            phoneNumber,
+            message,
+            session.context
+          );
+          break;
+        default:
+          response = await aiService.processFollowUp(
+            phoneNumber,
+            message,
+            session.context
+          );
       }
 
-      req.session.conversation.history = [
-        ...req.session.conversation.history.slice(-MAX_CONVERSATION_HISTORY),
-        { role: "user", content: messageBody },
-        { role: "assistant", content: responseMessage },
-      ];
+      // Update session
+      stateManager.updateSession(session.id, {
+        context: response.updatedContext,
+        state: response.nextState,
+      });
 
-      twiml.message(responseMessage);
-    } catch (error) {
-      logger.error("SMS Processing Error", { error, phone: senderPhone });
-      twiml.message(
-        "We're experiencing technical difficulties. Please try again later."
-      );
+      // Send response via SMS
+      await twilioService.sendSMS(phoneNumber, response.message);
+    } else {
+      // Start new conversation
+      response = await aiService.generateGreeting(phoneNumber);
+
+      // Create new session
+      const newSession = stateManager.createSession(phoneNumber);
+      stateManager.updateSession(newSession.id, {
+        state: "collecting_details",
+        context: {
+          ...response.context,
+          currentStep: "name",
+        },
+      });
+
+      // Send greeting via SMS
+      await twilioService.sendSMS(phoneNumber, response.message);
     }
 
-    res.type("text/xml").send(twiml.toString());
-  },
+    // Twilio expects an empty response for webhooks
+    res.type("text/xml");
+    res.status(200).send("<Response></Response>");
+  } catch (err) {
+    logger.error(`Error in SMS webhook: ${err.message}`);
+    next(err);
+  }
 };

@@ -1,33 +1,39 @@
 const { body, validationResult } = require("express-validator");
+const { AppError } = require("../utils/errorHandler");
 
-const validatePatient = [
-  body("name").notEmpty().withMessage("Name is required"),
-  body("age").isInt({ min: 0 }).withMessage("Age must be a valid number"),
-  body("email").isEmail().withMessage("Invalid email format"),
-  body("phone").notEmpty().withMessage("Phone number is required"),
-  (req, res, next) => {
+const validate = (validations) => {
+  return async (req, res, next) => {
+    await Promise.all(validations.map((validation) => validation.run(req)));
+
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, errors: errors.array() });
+    if (errors.isEmpty()) {
+      return next();
     }
-    next();
-  },
-];
 
-const validateAppointment = [
-  body("patientId").notEmpty().withMessage("Patient ID is required"),
-  body("date").isISO8601().withMessage("Invalid date format"),
-  body("time").notEmpty().withMessage("Time is required"),
-  body("status")
-    .isIn(["pending", "confirmed", "cancelled"])
-    .withMessage("Invalid status"),
-  (req, res, next) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, errors: errors.array() });
-    }
-    next();
-  },
-];
+    const errorMessages = errors.array().map((err) => err.msg);
+    return next(new AppError(errorMessages.join(", "), 400));
+  };
+};
 
-module.exports = { validatePatient, validateAppointment };
+const appointmentValidationRules = () => {
+  return [
+    body("patientId").isMongoId().withMessage("Invalid patient ID"),
+    body("doctorId").isMongoId().withMessage("Invalid doctor ID"),
+    body("date").isISO8601().withMessage("Invalid date format"),
+    body("reason").optional().isString().trim().escape(),
+  ];
+};
+
+const patientValidationRules = () => {
+  return [
+    body("name").isString().trim().notEmpty().withMessage("Name is required"),
+    body("phone").isMobilePhone().withMessage("Invalid phone number"),
+    body("email").optional().isEmail().withMessage("Invalid email"),
+  ];
+};
+
+module.exports = {
+  validate,
+  appointmentValidationRules,
+  patientValidationRules,
+};

@@ -1,33 +1,30 @@
 module.exports = {
-  CLINIC_CONFIG: {
-    name: "City Healthcare Center",
-    address: "123 Medical Drive, Cityville, ST 12345",
-    phone: "(555) 123-4567",
-    operatingHours: {
-      weekdays: { open: 8, close: 18 },
-      saturday: { open: 9, close: 14 },
-      sunday: { open: 0, close: 0 },
+  clinicName: "City Health Clinic",
+  clinicType: "multi-specialty",
+  address: "123 Main St, Anytown, USA",
+  phone: "+1 (555) 123-4567",
+  workingHours: "Monday to Friday, 9:00 AM to 5:00 PM",
+  autoConfirmAppointments: false, // Set to true for fully automated booking
+  availableDoctors: [
+    {
+      id: "dr_smith",
+      name: "Dr. Smith",
+      specialty: "General Practice",
+      availableDays: ["Monday", "Wednesday", "Friday"],
     },
-    services: [
-      "General Checkups",
-      "Vaccinations",
-      "Lab Tests",
-      "Specialist Consultations",
-      "Physical Therapy",
-      "Women's Health",
-    ],
-    doctors: {
-      "Dr. Smith": {
-        specialty: "Cardiology",
-        availability: ["Monday", "Wednesday", "Friday"],
-        workingHours: {
-          Monday: { start: "09:00", end: "17:00" },
-          Wednesday: { start: "08:30", end: "16:30" },
-          Friday: { start: "10:00", end: "18:00" },
-        },
-      },
-      // ... other doctors
+    {
+      id: "dr_jones",
+      name: "Dr. Jones",
+      specialty: "Pediatrics",
+      availableDays: ["Tuesday", "Thursday"],
     },
-    insurance: ["BlueCross", "Aetna", "Medicare", "Medicaid"],
-  },
+  ],
+  commonReasons: [
+    "Annual check-up",
+    "Follow-up visit",
+    "Vaccination",
+    "Blood test",
+    "Prescription refill",
+    "New health concern",
+  ],
 };

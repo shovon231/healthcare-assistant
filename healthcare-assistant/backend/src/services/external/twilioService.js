@@ -1,79 +1,45 @@
 const twilio = require("twilio");
-const winston = require("winston");
+const logger = require("../../utils/logger");
+const { AppError } = require("../../utils/errorHandler");
 
-const logger = winston.createLogger({
-  level: "info",
-  format: winston.format.json(),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: "logs/twilio.log" }),
-  ],
-});
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
-// Check if Twilio is properly configured
-function isConfigured() {
-  return (
-    !!process.env.TWILIO_ACCOUNT_SID &&
-    !!process.env.TWILIO_AUTH_TOKEN &&
-    !!process.env.TWILIO_PHONE_NUMBER
-  );
-}
-
-// Send booking confirmation
-async function sendBookingConfirmation(phone, doctor, date, time) {
-  if (!isConfigured()) {
-    throw new Error("Twilio credentials not configured");
-  }
-
+const sendSMS = async (to, body) => {
   try {
-    const client = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-
-    const response = await client.messages.create({
-      body: `Your appointment with ${doctor} is confirmed for ${date} at ${time}.`,
+    const message = await client.messages.create({
+      body,
       from: process.env.TWILIO_PHONE_NUMBER,
-      to: `+${phone.replace(/\D/g, "")}`,
+      to,
     });
 
-    logger.info(`📱 Sent confirmation to ${phone} (SID: ${response.sid})`);
-    return response;
-  } catch (error) {
-    logger.error(`❌ Twilio SMS Error: ${error.message}`);
-    throw error;
+    logger.info(`SMS sent to ${to}: ${message.sid}`);
+    return message;
+  } catch (err) {
+    logger.error(`Error sending SMS: ${err.message}`);
+    throw new AppError("Failed to send SMS", 500);
   }
-}
+};
 
-// Send cancellation notification
-async function sendCancellationNotification(phone, doctor, date, time) {
-  if (!isConfigured()) {
-    logger.warn("Twilio not configured - skipping cancellation SMS");
-    return null;
-  }
-
+const initiateVoiceCall = async (to, url) => {
   try {
-    const client = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-
-    const response = await client.messages.create({
-      body: `Your appointment with ${doctor} on ${date} at ${time} has been cancelled.`,
+    const call = await client.calls.create({
+      url,
+      to,
       from: process.env.TWILIO_PHONE_NUMBER,
-      to: `+${phone.replace(/\D/g, "")}`,
     });
 
-    logger.info(`📱 Sent cancellation to ${phone} (SID: ${response.sid})`);
-    return response;
-  } catch (error) {
-    logger.error(`❌ Twilio Cancellation Error: ${error.message}`);
-    throw error;
+    logger.info(`Voice call initiated to ${to}: ${call.sid}`);
+    return call;
+  } catch (err) {
+    logger.error(`Error initiating voice call: ${err.message}`);
+    throw new AppError("Failed to initiate voice call", 500);
   }
-}
+};
 
 module.exports = {
-  isConfigured,
-  sendBookingConfirmation,
-  sendCancellationNotification,
+  sendSMS,
+  initiateVoiceCall,
 };
